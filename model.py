@@ -28,7 +28,7 @@ def system(z:np.ndarray ,t:np.ndarray ,par:dict):
 
 def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
     """
-    Vectorized stochastic lattice (no diffusion). Uses a numpy Generator for faster poisson draws.
+    Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
     if rng is None:
         rng = np.random.default_rng()
@@ -37,28 +37,96 @@ def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
     lam = par['lambda']
     nu = par['nu']
     sigma = par['sigma']
+    Dx = par['Dx']
+    Dy = par['Dy']
     lattice = np.zeros((N, 2), dtype=np.int64)      # integer lattice for counts
     lattice[:, 0] = 3
-    lattice[:, 1] = 1
-    lattice_prev = lattice.copy()
+    if Dx and Dy == 0:      # no diffusion
+        lattice[:, 1] = 1
+    else:
+        lattice[:, 1] = rng.poisson(lam=1)
+    lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
     for t in range(time_steps):
-        prod = lattice_prev[:, 0] * lattice_prev[:, 1]            # elementwise xy
+        prod = lattice_old[:, 0] * lattice_old[:, 1]            # elementwise xy
         # vectorized Poisson draws
-        births_x = rng.poisson(alpha * lattice_prev[:, 0])
+        births_x = rng.poisson(alpha * lattice_old[:, 0])
         kills_x = rng.poisson(gamma * prod)
         births_y = rng.poisson(lam, size=N)
         dup_y = rng.poisson(nu * prod)
-        deaths_y = rng.poisson(sigma * lattice_prev[:, 1])
+        deaths_y = rng.poisson(sigma * lattice_old[:, 1])
         # update lattice (vectorized)
         lattice[:, 0] = births_x - kills_x
         lattice[:, 1] = births_y + dup_y - deaths_y
+        if Dx or Dy > 0:    # diffusion
+            diffX = rng.poisson(lam=Dx*lattice[:,0])
+            diffY = rng.poisson(lam=Dy*lattice[:,1])
+            np.minimum(diffX,lattice[:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
+            np.minimum(diffY,lattice[:,1],out=diffY)
+            diffX = diffX // 2      # divide the # of individuals to diffuse from each site by the # of neighbours
+            diffY = diffY // 2      # approximate down
+            lattice[:,0] -= diffX   # take out the diffused individuals
+            lattice[:,1] -= diffY
+            lattice[:,0] += np.roll(diffX,+1) + np.roll(diffX,-1)  # add the diffused individuals
+            lattice[:,1] += np.roll(diffY,+1) + np.roll(diffY,-1)  
         np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
-        lattice_prev = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
+        lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         # mean
         X_stoc[t] = lattice[:, 0].mean()
         Y_stoc[t] = lattice[:, 1].mean()
+    return X_stoc, Y_stoc
+
+def lattice2(time_steps:int,par:dict,N:int=100,rng=None):
+    """
+    Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
+    gamma = par['gamma']
+    lam = par['lambda']
+    nu = par['nu']
+    sigma = par['sigma']
+    Dx = par['Dx']
+    Dy = par['Dy']
+    lattice = np.zeros((N, N, 2), dtype=np.int64)      # integer lattice for counts
+    lattice[:, :, 0] = 3
+    if Dx and Dy == 0:      # no diffusion
+        lattice[:, :, 1] = 1
+    else:
+        lattice[:, :, 1] = rng.poisson(lam=1)
+    lattice_old = lattice.copy()
+    X_stoc = np.zeros(time_steps, dtype=float)
+    Y_stoc = np.zeros(time_steps, dtype=float)
+    for t in range(time_steps):
+        prod = lattice_old[:, :, 0] * lattice_old[:, :, 1]            # elementwise xy
+        # vectorized Poisson draws
+        births_x = rng.poisson(alpha * lattice_old[:, :, 0])
+        kills_x = rng.poisson(gamma * prod)
+        births_y = rng.poisson(lam, size=N)
+        dup_y = rng.poisson(nu * prod)
+        deaths_y = rng.poisson(sigma * lattice_old[:, :, 1])
+        # update lattice (vectorized)
+        lattice[:, :, 0] = births_x - kills_x
+        lattice[:, :, 1] = births_y + dup_y - deaths_y
+        if Dx or Dy > 0:    # diffusion
+            diffX = rng.poisson(lam=Dx*lattice[:,:,0])
+            diffY = rng.poisson(lam=Dy*lattice[:,:,1])
+            np.minimum(diffX,lattice[:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
+            np.minimum(diffY,lattice[:,:,1],out=diffY)
+            diffX = diffX // 4      # divide the # of individuals to diffuse from each site by the # of neighbours
+            diffY = diffY // 4      # approximate down
+            lattice[:,:,0] -= diffX   # take out the diffused individuals
+            lattice[:,:,1] -= diffY
+            lattice[:,:,0] += np.roll(diffX,+1,axis=0) + np.roll(diffX,-1,axis=0)  # add the diffused individuals 
+            lattice[:,:,0] += np.roll(diffX,+1,axis=1) + np.roll(diffX,-1,axis=1)  
+            lattice[:,:,1] += np.roll(diffY,+1,axis=0) + np.roll(diffY,-1,axis=0)  
+            lattice[:,:,1] += np.roll(diffY,+1,axis=1) + np.roll(diffY,-1,axis=1)  
+        np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
+        lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
+        X_stoc[t] = lattice[:, :, 0].mean()    # mean
+        Y_stoc[t] = lattice[:, :, 1].mean()
     return X_stoc, Y_stoc
 
 # Utility functions
@@ -187,6 +255,7 @@ def DP1d(args,rng=None,verb:int=0):
     return np.sum(lattice)/N
 
 def DP2d(args,rng=None,verb:int=0):
+    # anche qua è 'circolare'
     N, timesteps, Pdis, Pinv = args
     if rng is None:
         rng = np.random.default_rng()
@@ -213,6 +282,7 @@ def DP2d(args,rng=None,verb:int=0):
     return np.sum(lattice)/N**2
 
 def DP3d(args,rng=None,verb:int=0):
+    # anche qua è 'circolare'
     N, timesteps, Pdis, Pinv = args
     if rng is None:
         rng = np.random.default_rng()
@@ -240,7 +310,7 @@ def DP3d(args,rng=None,verb:int=0):
         return filling_history
     return np.sum(lattice)/N**3
     
-def filling_fraction(model,Pspan:np.ndarray,N:int=10000,timesteps:int=500,Pdis:float=0,n_iter:int=50):
+def filling_fraction(model,Pspan:np.ndarray,params:list):
     """Function to evaluate the filling fraction for a DP model. Utilizes ProcessPollExecutor for parallel execution, leading to better performances.
 
     Args:
@@ -254,6 +324,7 @@ def filling_fraction(model,Pspan:np.ndarray,N:int=10000,timesteps:int=500,Pdis:f
     Returns:
         _type_: _description_
     """
+    N, timesteps, Pdis, n_iter = params
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
@@ -267,5 +338,4 @@ def filling_fraction(model,Pspan:np.ndarray,N:int=10000,timesteps:int=500,Pdis:f
                 for res in exe.map(model,args):
                     success += res
         F[1,i] = success/n_iter            
-        
     return F
