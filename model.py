@@ -186,18 +186,17 @@ def DP1d(args,rng=None,verb:int=0):
         return filling_history
     return np.sum(lattice)/N
 
-def DP2d(args, rng=None, verb: int = 0):
+def DP2d(args,rng=None,verb:int=0):
     N, timesteps, Pdis, Pinv = args
     if rng is None:
         rng = np.random.default_rng()
-    lattice = np.ones((N, N), dtype=np.int64)   # initialize the lattice with all 1s
+    lattice = np.ones((N,N),dtype=np.int64)   # initialize the lattice with all 1s
     lattice_old = lattice.copy()
     if verb > 0:
         filling_history = np.zeros(timesteps, dtype=float)
     # Evaulate the probabilities out of the loop for better performance
-    Mdis = rng.choice([0, 1], size=(N, N, timesteps), p=[Pdis, 1 - Pdis])
-    Minv = rng.choice([0, 1], size=(N, N, 4, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up
-
+    Mdis = rng.choice(2, size=(N, N, timesteps), p=[Pdis, 1 - Pdis])
+    Minv = rng.choice(2, size=(N, N, 4, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up
     for t in range(timesteps):
         lattice = lattice_old * Mdis[:, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, 0, t], +1, axis=1)  # right invasion
@@ -212,6 +211,34 @@ def DP2d(args, rng=None, verb: int = 0):
     if verb > 0:
         return filling_history
     return np.sum(lattice)/N**2
+
+def DP3d(args,rng=None,verb:int=0):
+    N, timesteps, Pdis, Pinv = args
+    if rng is None:
+        rng = np.random.default_rng()
+    lattice = np.ones((N,N,N),dtype=np.int64)   # initialize the lattice with all 1s
+    lattice_old = lattice.copy()
+    if verb > 0:
+        filling_history = np.zeros(timesteps, dtype=float)
+    # Evaulate the probabilities out of the loop for better performance
+    Mdis = rng.choice(2, size=(N, N, N, timesteps), p=[Pdis, 1 - Pdis])
+    Minv = rng.choice(2, size=(N, N, N, 6, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up,4:in,5:out
+    for t in range(timesteps):
+        lattice = lattice_old * Mdis[:, :, :, t]       # disappearance step
+        lattice += np.roll(lattice_old * Minv[:, :, :, 0, t], +1, axis=1)  # right invasion
+        lattice += np.roll(lattice_old * Minv[:, :, :, 1, t], -1, axis=1)  # left
+        lattice += np.roll(lattice_old * Minv[:, :, :, 2, t], +1, axis=0)  # down
+        lattice += np.roll(lattice_old * Minv[:, :, :, 3, t], -1, axis=0)  # up
+        lattice += np.roll(lattice_old * Minv[:, :, :, 4, t], +1, axis=2)  # in
+        lattice += np.roll(lattice_old * Minv[:, :, :, 5, t], -1, axis=2)  # out
+        lattice = (lattice > 0).astype(np.int64)     # clip the lattice to 0s and 1s
+        lattice_old = lattice.copy()
+        if verb > 0:
+            print(lattice)
+            filling_history[t] = np.sum(lattice)/N**3
+    if verb > 0:
+        return filling_history
+    return np.sum(lattice)/N**3
     
 def filling_fraction(model,Pspan:np.ndarray,N:int=10000,timesteps:int=500,Pdis:float=0,n_iter:int=50):
     """Function to evaluate the filling fraction for a DP model. Utilizes ProcessPollExecutor for parallel execution, leading to better performances.
