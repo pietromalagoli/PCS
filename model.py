@@ -6,6 +6,40 @@ import concurrent.futures
 
 import aux      # it's a file with some generic auxiliary functions I often use
 
+# Utility functions
+def stability(par):         # In which regime are we?
+    print(f'In which regime are we? {'First regime:(0,y_0) unstable, (x*,y*) stable' \
+        if par['alpha']*par['sigma']>(par['lambda']*par['gamma']) else 'Second regime:(0,y_0) stable, (x*,y*) non-biological'}')
+    if par['alpha']*par['sigma']>(par['lambda']*par['gamma']):
+        if par['lambda']**2 * par['gamma']**2 > 4*par['alpha']**2 * (par['sigma']*par['alpha']-par['lambda']*par['gamma']):
+            print('The attractor (x*,y*) is a stable node (positive disciminant -> no oscillations)') 
+        elif par['lambda']**2 * par['gamma']**2 == 4*par['alpha']**2 * (par['sigma']*par['alpha']-par['lambda']*par['gamma']):
+            print('The attractor (x*,y*) is a degenerate node (null discriminant)')
+        else:
+            print(f'The attractor (x*,y*) is a stable spiral (negative discriminant -> damped oscillations)')
+            
+def check_sign(arr:np.ndarray):
+    arr[arr<0] = 0.
+
+def add_par_box(par):       # function to add a parameter box to the 
+    # Add a parameter box to the plot
+    textstr = '\n'.join((
+    r'$\alpha=%.2f$' % (par['alpha'], ),
+    r'$\gamma=%.2f$' % (par['gamma'], ),
+    r'$\lambda=%.2f$' % (par['lambda'], ),
+    r'$\nu=%.2e$' % (par['nu'], ),
+    r'$\sigma=%.2f$' % (par['sigma'], ),
+    r'$D_{x}=%.1f$' % (par['Dx'], ),
+    r'$D_{y}=%.1f$' % (par['Dy'], )))
+
+    # these are matplotlib.patch.Patch properties
+    props = dict(boxstyle='round', facecolor='white', alpha=0.3)
+
+    # place a text box in the best spot in axes coords
+    plt.gca().text(0.98, 0.60, textstr, transform=plt.gca().transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='right', bbox=props)
+
+# Mean Field
 def system(z:np.ndarray ,t:np.ndarray ,par:dict):
     """ODEs system for the ISP problem.
 
@@ -26,6 +60,7 @@ def system(z:np.ndarray ,t:np.ndarray ,par:dict):
         y = 0.
     return [dxdt,dydt]
 
+# Stochastic system
 def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
@@ -52,6 +87,7 @@ def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
         prod = lattice_old[:, 0] * lattice_old[:, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, 0])
+        #print(gamma*prod)
         kills_x = rng.poisson(gamma * prod)
         births_y = rng.poisson(lam, size=N)
         dup_y = rng.poisson(nu * prod)
@@ -60,10 +96,11 @@ def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
         lattice[:, 0] = births_x - kills_x
         lattice[:, 1] = births_y + dup_y - deaths_y
         if Dx or Dy > 0:    # diffusion
-            diffX = rng.poisson(lam=Dx*lattice[:,0])
-            diffY = rng.poisson(lam=Dy*lattice[:,1])
-            np.minimum(diffX,lattice[:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
-            np.minimum(diffY,lattice[:,1],out=diffY)
+            diffX = rng.poisson(lam=Dx*lattice_old[:,0])
+            diffX = np.zeros(lattice_old[:,0].shape,dtype=np.int64)
+            diffY = rng.poisson(lam=Dy*lattice_old[:,1])
+            np.minimum(diffX,lattice_old[:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
+            np.minimum(diffY,lattice_old[:,1],out=diffY)
             diffX = diffX // 2      # divide the # of individuals to diffuse from each site by the # of neighbours
             diffY = diffY // 2      # approximate down
             lattice[:,0] -= diffX   # take out the diffused individuals
@@ -128,37 +165,6 @@ def lattice2(time_steps:int,par:dict,N:int=100,rng=None):
         X_stoc[t] = lattice[:, :, 0].mean()    # mean
         Y_stoc[t] = lattice[:, :, 1].mean()
     return X_stoc, Y_stoc
-
-# Utility functions
-def stability(par):         # In which regime are we?
-    print(f'In which regime are we? {'First regime:(0,y_0) unstable, (x*,y*) stable' \
-        if par['alpha']*par['sigma']>(par['lambda']*par['gamma']) else 'Second regime:(0,y_0) stable, (x*,y*) non-biological'}')
-    if par['alpha']*par['sigma']>(par['lambda']*par['gamma']):
-        if par['lambda']**2 * par['gamma']**2 > 4*par['alpha']**2 * (par['sigma']*par['alpha']-par['lambda']*par['gamma']):
-            print('The attractor (x*,y*) is a stable node (positive disciminant -> no oscillations)') 
-        elif par['lambda']**2 * par['gamma']**2 == 4*par['alpha']**2 * (par['sigma']*par['alpha']-par['lambda']*par['gamma']):
-            print('The attractor (x*,y*) is a degenerate node (null discriminant)')
-        else:
-            print(f'The attractor (x*,y*) is a stable spiral (negative discriminant -> damped oscillations)')
-            
-def check_sign(arr:np.ndarray):
-    arr[arr<0] = 0.
-
-def add_par_box(par):       # function to add a parameter box to the 
-    # Add a parameter box to the plot
-    textstr = '\n'.join((
-    r'$\alpha=%.2f$' % (par['alpha'], ),
-    r'$\gamma=%.2f$' % (par['gamma'], ),
-    r'$\lambda=%.2f$' % (par['lambda'], ),
-    r'$\nu=%.2e$' % (par['nu'], ),
-    r'$\sigma=%.2f$' % (par['sigma'], )))
-
-    # these are matplotlib.patch.Patch properties
-    props = dict(boxstyle='round', facecolor='white', alpha=0.3)
-
-    # place a text box in the best spot in axes coords
-    plt.gca().text(0.98, 0.60, textstr, transform=plt.gca().transAxes, fontsize=10,
-            verticalalignment='top', horizontalalignment='right', bbox=props)
     
 # Evaluating probability of disappearance
 def _run_model_check(args):
