@@ -87,7 +87,6 @@ def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
         prod = lattice_old[:, 0] * lattice_old[:, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, 0])
-        #print(gamma*prod)
         kills_x = rng.poisson(gamma * prod)
         births_y = rng.poisson(lam, size=N)
         dup_y = rng.poisson(nu * prod)
@@ -96,9 +95,8 @@ def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
         lattice[:, 0] = births_x - kills_x
         lattice[:, 1] = births_y + dup_y - deaths_y
         if Dx or Dy > 0:    # diffusion
-            diffX = rng.poisson(lam=Dx*lattice_old[:,0])
-            diffX = np.zeros(lattice_old[:,0].shape,dtype=np.int64)
-            diffY = rng.poisson(lam=Dy*lattice_old[:,1])
+            diffX = rng.poisson(np.sqrt(Dx*lattice_old[:,0]))
+            diffY = rng.poisson(np.sqrt(Dy*lattice_old[:,1]))
             np.minimum(diffX,lattice_old[:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
             np.minimum(diffY,lattice_old[:,1],out=diffY)
             diffX = diffX // 2      # divide the # of individuals to diffuse from each site by the # of neighbours
@@ -140,18 +138,24 @@ def lattice2(time_steps:int,par:dict,N:int=100,rng=None):
         prod = lattice_old[:, :, 0] * lattice_old[:, :, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, :, 0])
-        kills_x = rng.poisson(gamma * prod)
+        try:
+            kills_x = rng.poisson(gamma * prod)
+        except:
+            kills_x = np.zeros((N,N),dtype=np.int64)
         births_y = rng.poisson(lam, size=N)
-        dup_y = rng.poisson(nu * prod)
+        try:
+            dup_y = rng.poisson(nu * prod)
+        except:
+            dup_y = np.zeros((N,N),dtype=np.int64)
         deaths_y = rng.poisson(sigma * lattice_old[:, :, 1])
         # update lattice (vectorized)
         lattice[:, :, 0] = births_x - kills_x
         lattice[:, :, 1] = births_y + dup_y - deaths_y
         if Dx or Dy > 0:    # diffusion
-            diffX = rng.poisson(lam=Dx*lattice[:,:,0])
-            diffY = rng.poisson(lam=Dy*lattice[:,:,1])
-            np.minimum(diffX,lattice[:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
-            np.minimum(diffY,lattice[:,:,1],out=diffY)
+            diffX = rng.poisson(np.sqrt(Dx*lattice_old[:,:,0]))
+            diffY = rng.poisson(np.sqrt(Dy*lattice_old[:,:,1]))
+            np.minimum(diffX,lattice_old[:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
+            np.minimum(diffY,lattice_old[:,:,1],out=diffY)
             diffX = diffX // 4      # divide the # of individuals to diffuse from each site by the # of neighbours
             diffY = diffY // 4      # approximate down
             lattice[:,:,0] -= diffX   # take out the diffused individuals
