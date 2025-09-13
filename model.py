@@ -61,10 +61,11 @@ def system(z:np.ndarray ,t:np.ndarray ,par:dict):
     return [dxdt,dydt]
 
 # Stochastic system
-def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
+def lattice1(args,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
+    N, time_steps, par, fill = args
     if rng is None:
         rng = np.random.default_rng()
     alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
@@ -110,12 +111,15 @@ def lattice1(time_steps:int,par:dict,N:int=100,rng=None):
         # mean
         X_stoc[t] = lattice[:, 0].mean()
         Y_stoc[t] = lattice[:, 1].mean()
+    if fill:
+        return np.count_nonzero(lattice[:, 0]) / N
     return X_stoc, Y_stoc
 
-def lattice2(time_steps:int,par:dict,N:int=100,rng=None):
+def lattice2(args,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
+    N, time_steps, par, fill = args
     if rng is None:
         rng = np.random.default_rng()
     alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
@@ -168,6 +172,8 @@ def lattice2(time_steps:int,par:dict,N:int=100,rng=None):
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         X_stoc[t] = lattice[:, :, 0].mean()    # mean
         Y_stoc[t] = lattice[:, :, 1].mean()
+    if fill:
+        return np.count_nonzero(lattice[:, 0]) / N**2
     return X_stoc, Y_stoc
     
 # Evaluating probability of disappearance
@@ -320,7 +326,7 @@ def DP3d(args,rng=None,verb:int=0):
         return filling_history
     return np.sum(lattice)/N**3
     
-def filling_fraction(model,Pspan:np.ndarray,params:list):
+def filling_fraction_DP(model,Pspan:np.ndarray,params:list):
     """Function to evaluate the filling fraction for a DP model. Utilizes ProcessPollExecutor for parallel execution, leading to better performances.
 
     Args:
@@ -338,8 +344,36 @@ def filling_fraction(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
-        print(f'Parameters set #{i}...')
         args = [(N, timesteps, Pdis, Pinv)] * n_iter
+        success = 0
+        if n_iter == 1:
+            success = model(args[0])
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
+                for res in exe.map(model,args):
+                    success += res
+        F[1,i] = success/n_iter            
+    return F
+
+def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
+    """Function to evaluate the filling fraction for a STOCHASTIC model. Utilizes ProcessPollExecutor for parallel execution, leading to better performances.
+
+    Args:
+        model (_type_): DP model
+        Pspan (np.ndarray): set of Pinv to test.
+        N (int, optional): lattice size. Defaults to 10000.
+        timesteps (int, optional): number of timesteps of each execution. Defaults to 500.
+        Pdis (float, optional): probabiilty of disappearence. Defaults to 0.
+        n_iter (int, optional): number of iterations for each set of parameters. Defaults to 50.
+
+    Returns:
+        _type_: _description_
+    """
+    N, timesteps, par, n_iter, fill = params
+    F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
+    max_workers = min(os.cpu_count() or 1,n_iter,8)
+    for i,Pinv in enumerate(Pspan):
+        args = [(N, timesteps, par, fill)] * n_iter
         success = 0
         if n_iter == 1:
             success = model(args[0])
