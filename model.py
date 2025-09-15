@@ -21,22 +21,31 @@ def stability(par):         # In which regime are we?
 def check_sign(arr:np.ndarray):
     arr[arr<0] = 0.
 
-def add_par_box(par):       # function to add a parameter box to the 
-    # Add a parameter box to the plot
-    textstr = '\n'.join((
-    r'$\alpha=%.2f$' % (par['alpha'], ),
-    r'$\gamma=%.2f$' % (par['gamma'], ),
-    r'$\lambda=%.2f$' % (par['lambda'], ),
-    r'$\nu=%.2e$' % (par['nu'], ),
-    r'$\sigma=%.2f$' % (par['sigma'], ),
-    r'$D_{x}=%.1f$' % (par['Dx'], ),
-    r'$D_{y}=%.1f$' % (par['Dy'], )))
+def add_par_box(par):
+    # Build lines for any numerical parameters in the dict, formatted with .2f
+    lines = []
+    for k in sorted(par.keys()):
+        v_raw = par[k]
+        try:
+            v = float(v_raw)
+        except Exception:
+            continue
+        # escape underscores for safe rendering in text
+        key_label = str(k).replace('_', r'\_')
+        # display integers with no decimals, but skip booleans
+        if not isinstance(v_raw, bool) and isinstance(v_raw, (int, np.integer)):
+            lines.append(f'{key_label}={v:.0f}')
+        else:
+            lines.append(f'{key_label}={v:.2f}')
 
-    # these are matplotlib.patch.Patch properties
+    if not lines:
+        return
+
+    textstr = '\n'.join(lines)
+
     props = dict(boxstyle='round', facecolor='white', alpha=0.3)
-
-    # place a text box in the best spot in axes coords
-    plt.gca().text(0.98, 0.60, textstr, transform=plt.gca().transAxes, fontsize=10,
+    ax = plt.gca()
+    ax.text(0.98, 0.60, textstr, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', horizontalalignment='right', bbox=props)
 
 # Mean Field
@@ -142,22 +151,16 @@ def lattice2(args,rng=None):
         prod = lattice_old[:, :, 0] * lattice_old[:, :, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, :, 0])
-        try:
-            kills_x = rng.poisson(gamma * prod)
-        except:
-            kills_x = np.zeros((N,N),dtype=np.int64)
+        kills_x = rng.poisson(np.sqrt((gamma * prod)**2))
         births_y = rng.poisson(lam, size=N)
-        try:
-            dup_y = rng.poisson(nu * prod)
-        except:
-            dup_y = np.zeros((N,N),dtype=np.int64)
+        dup_y = rng.poisson(np.sqrt((nu * prod)**2))
         deaths_y = rng.poisson(sigma * lattice_old[:, :, 1])
         # update lattice (vectorized)
         lattice[:, :, 0] = births_x - kills_x
         lattice[:, :, 1] = births_y + dup_y - deaths_y
         if Dx or Dy > 0:    # diffusion
-            diffX = rng.poisson(np.sqrt(Dx*lattice_old[:,:,0]))
-            diffY = rng.poisson(np.sqrt(Dy*lattice_old[:,:,1]))
+            diffX = rng.poisson(np.sqrt((Dx*lattice_old[:,:,0])**2))
+            diffY = rng.poisson(np.sqrt((Dy*lattice_old[:,:,1])**2))
             np.minimum(diffX,lattice_old[:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
             np.minimum(diffY,lattice_old[:,:,1],out=diffY)
             diffX = diffX // 4      # divide the # of individuals to diffuse from each site by the # of neighbours
@@ -173,9 +176,66 @@ def lattice2(args,rng=None):
         X_stoc[t] = lattice[:, :, 0].mean()    # mean
         Y_stoc[t] = lattice[:, :, 1].mean()
     if fill:
-        return np.count_nonzero(lattice[:, 0]) / N**2
+        return np.count_nonzero(lattice[:, :, 0]) / N**2
     return X_stoc, Y_stoc
-    
+
+def lattice3(args,rng=None):
+    """
+    Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
+    """
+    N, time_steps, par, fill = args
+    if rng is None:
+        rng = np.random.default_rng()
+    alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
+    gamma = par['gamma']
+    lam = par['lambda']
+    nu = par['nu']
+    sigma = par['sigma']
+    Dx = par['Dx']
+    Dy = par['Dy']
+    lattice = np.zeros((N, N, N, 2), dtype=np.int64)      # integer lattice for counts
+    lattice[:, :, 0] = 3
+    if Dx and Dy == 0:      # no diffusion
+        lattice[:, :, 1] = 1
+    else:
+        lattice[:, :, 1] = rng.poisson(lam=1)
+    lattice_old = lattice.copy()
+    X_stoc = np.zeros(time_steps, dtype=float)
+    Y_stoc = np.zeros(time_steps, dtype=float)
+    for t in range(time_steps):
+        prod = lattice_old[:, :, :, 0] * lattice_old[:, :, :, 1]            # elementwise xy
+        # vectorized Poisson draws
+        births_x = rng.poisson(alpha * lattice_old[:, :, :, 0])
+        kills_x = rng.poisson(gamma * prod)
+        births_y = rng.poisson(lam, size=N)
+        dup_y = rng.poisson(nu * prod)
+        deaths_y = rng.poisson(sigma * lattice_old[:, :, :, 1])
+        # update lattice (vectorized)
+        lattice[:, :, :, 0] = births_x - kills_x
+        lattice[:, :, :, 1] = births_y + dup_y - deaths_y
+        if Dx or Dy > 0:    # diffusion
+            diffX = rng.poisson(np.sqrt((Dx*lattice_old[:,:,:,0])**2))
+            diffY = rng.poisson(np.sqrt((Dy*lattice_old[:,:,:,1])**2))
+            np.minimum(diffX,lattice_old[:,:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
+            np.minimum(diffY,lattice_old[:,:,:,1],out=diffY)
+            diffX = diffX // 6      # divide the # of individuals to diffuse from each site by the # of neighbours
+            diffY = diffY // 6      # approximate down
+            lattice[:,:,:,0] -= diffX   # take out the diffused individuals
+            lattice[:,:,:,1] -= diffY
+            lattice[:,:,:,0] += np.roll(diffX,+1,axis=0) + np.roll(diffX,-1,axis=0)  # add the diffused individuals 
+            lattice[:,:,:,0] += np.roll(diffX,+1,axis=1) + np.roll(diffX,-1,axis=1)  
+            lattice[:,:,:,0] += np.roll(diffX,+1,axis=2) + np.roll(diffX,-1,axis=2)  
+            lattice[:,:,:,1] += np.roll(diffY,+1,axis=0) + np.roll(diffY,-1,axis=0)  
+            lattice[:,:,:,1] += np.roll(diffY,+1,axis=1) + np.roll(diffY,-1,axis=1)  
+            lattice[:,:,:,1] += np.roll(diffY,+1,axis=2) + np.roll(diffY,-1,axis=2)  
+        np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
+        lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
+        X_stoc[t] = lattice[:, :, :, 0].mean()    # mean
+        Y_stoc[t] = lattice[:, :, :, 1].mean()
+    if fill:
+        return np.count_nonzero(lattice[:, :, :, 0]) / N**3
+    return X_stoc, Y_stoc
+
 # Evaluating probability of disappearance
 def _run_model_check(args):
     model, N, time_steps, par = args
@@ -344,6 +404,7 @@ def filling_fraction_DP(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
+        print(f'DP: set#{i}')
         args = [(N, timesteps, Pdis, Pinv)] * n_iter
         success = 0
         if n_iter == 1:
@@ -373,6 +434,7 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
+        print(f'ST: set#{i}')
         local_par = par.copy()
         local_par['Dx'],local_par['Dy'] = [Pinv,Pinv]
         args = [(N, timesteps, local_par, fill)] * n_iter
