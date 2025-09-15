@@ -258,13 +258,13 @@ def DP1d(args,rng=None,verb:int=0):
     for t in range(timesteps):
         lattice *= Mdis[:,t]        # disappearance step
         Rinv = lattice_old*MinvR[:,t]     # only lattice sites which were occupied at the previous step (i.e. had a value of 1) can invade
-        Linv = lattice_old*MinvL[:,t]     
+        Linv = lattice_old*MinvL[:,t] 
         # invasion step (note that we consider a circular lattice, since for np.roll elements that roll beyond the last position are re-introduced at the first
-        lattice = (lattice_old+np.roll(Rinv,+1)) + (lattice_old+np.roll(Linv,-1))    
+        lattice = (lattice+np.roll(Rinv,+1)) + (lattice+np.roll(Linv,-1))    
         lattice = (lattice > 0).astype(np.int64)     # clip the lattice to 0s and 1s
         lattice_old = lattice.copy()
         if verb > 0:
-            print(lattice)
+            print(f'Lattice:{lattice}')
             filling_history[t] = np.sum(lattice)/N
     if verb > 0:
         return filling_history
@@ -283,7 +283,7 @@ def DP2d(args,rng=None,verb:int=0):
     Mdis = rng.choice(2, size=(N, N, timesteps), p=[Pdis, 1 - Pdis])
     Minv = rng.choice(2, size=(N, N, 4, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up
     for t in range(timesteps):
-        lattice = lattice_old * Mdis[:, :, t]       # disappearance step
+        lattice *= Mdis[:, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, 0, t], +1, axis=1)  # right invasion
         lattice += np.roll(lattice_old * Minv[:, :, 1, t], -1, axis=1)  # left
         lattice += np.roll(lattice_old * Minv[:, :, 2, t], +1, axis=0)  # down
@@ -310,7 +310,7 @@ def DP3d(args,rng=None,verb:int=0):
     Mdis = rng.choice(2, size=(N, N, N, timesteps), p=[Pdis, 1 - Pdis])
     Minv = rng.choice(2, size=(N, N, N, 6, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up,4:in,5:out
     for t in range(timesteps):
-        lattice = lattice_old * Mdis[:, :, :, t]       # disappearance step
+        lattice *= Mdis[:, :, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, :, 0, t], +1, axis=1)  # right invasion
         lattice += np.roll(lattice_old * Minv[:, :, :, 1, t], -1, axis=1)  # left
         lattice += np.roll(lattice_old * Minv[:, :, :, 2, t], +1, axis=0)  # down
@@ -373,7 +373,9 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
-        args = [(N, timesteps, par, fill)] * n_iter
+        local_par = par.copy()
+        local_par['D_x'] = Pinv
+        args = [(N, timesteps, local_par, fill)] * n_iter
         success = 0
         if n_iter == 1:
             success = model(args[0])
