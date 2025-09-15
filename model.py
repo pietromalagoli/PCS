@@ -76,7 +76,7 @@ def lattice1(args,rng=None):
     Dx = par['Dx']
     Dy = par['Dy']
     lattice = np.zeros((N, 2), dtype=np.int64)      # integer lattice for counts
-    lattice[:, 0] = 3
+    lattice[:, 0] = 3       # initialization
     if Dx and Dy == 0:      # no diffusion
         lattice[:, 1] = 1
     else:
@@ -374,7 +374,7 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
         local_par = par.copy()
-        local_par['D_x'] = Pinv
+        local_par['Dx'],local_par['Dy'] = [Pinv,Pinv]
         args = [(N, timesteps, local_par, fill)] * n_iter
         success = 0
         if n_iter == 1:
