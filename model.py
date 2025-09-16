@@ -74,7 +74,7 @@ def lattice1(args,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
-    N, time_steps, par, fill = args
+    N, time_steps, par, mode = args
     if rng is None:
         rng = np.random.default_rng()
     alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
@@ -90,6 +90,8 @@ def lattice1(args,rng=None):
         lattice[:, 1] = 1
     else:
         lattice[:, 1] = rng.poisson(lam=1)
+    if mode == 2:  
+        density = np.zeros(time_steps)
     lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
@@ -120,15 +122,19 @@ def lattice1(args,rng=None):
         # mean
         X_stoc[t] = lattice[:, 0].mean()
         Y_stoc[t] = lattice[:, 1].mean()
-    if fill:
+        if mode == 2:
+            density[t] = np.count_nonzero(lattice[:, 0]) / N
+    if mode == 1:
         return np.count_nonzero(lattice[:, 0]) / N
+    elif mode == 2: 
+        return density
     return X_stoc, Y_stoc
 
 def lattice2(args,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
-    N, time_steps, par, fill = args
+    N, time_steps, par, mode = args
     if rng is None:
         rng = np.random.default_rng()
     alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
@@ -144,6 +150,8 @@ def lattice2(args,rng=None):
         lattice[:, :, 1] = 1
     else:
         lattice[:, :, 1] = rng.poisson(lam=1)
+    if mode == 2:
+        density = np.zeros(time_steps)
     lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
@@ -175,15 +183,19 @@ def lattice2(args,rng=None):
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         X_stoc[t] = lattice[:, :, 0].mean()    # mean
         Y_stoc[t] = lattice[:, :, 1].mean()
-    if fill:
+        if mode == 2:
+            density[t] = np.count_nonzero(lattice[:, :, 0]) / N**2
+    if mode == 1:
         return np.count_nonzero(lattice[:, :, 0]) / N**2
+    elif mode == 2: 
+        return density
     return X_stoc, Y_stoc
 
 def lattice3(args,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
-    N, time_steps, par, fill = args
+    N, time_steps, par, mode = args
     if rng is None:
         rng = np.random.default_rng()
     alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
@@ -199,6 +211,8 @@ def lattice3(args,rng=None):
         lattice[:, :, 1] = 1
     else:
         lattice[:, :, 1] = rng.poisson(lam=1)
+    if mode == 2:
+        density = np.zeros(time_steps)
     lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
@@ -232,8 +246,12 @@ def lattice3(args,rng=None):
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         X_stoc[t] = lattice[:, :, :, 0].mean()    # mean
         Y_stoc[t] = lattice[:, :, :, 1].mean()
-    if fill:
+        if mode == 2:
+            density[t] = np.count_nonzero(lattice[:, :, :, 0]) / N**3
+    if mode == 1:
         return np.count_nonzero(lattice[:, :, :, 0]) / N**3
+    elif mode == 2: 
+        return density
     return X_stoc, Y_stoc
 
 # Evaluating probability of disappearance
@@ -404,7 +422,8 @@ def filling_fraction_DP(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
-        print(f'DP: set#{i}')
+        if i & 10 == 0:
+            print(f'DP: set#{i}')
         args = [(N, timesteps, Pdis, Pinv)] * n_iter
         success = 0
         if n_iter == 1:
@@ -434,7 +453,8 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
-        print(f'ST: set#{i}')
+        if i % 10 == 0:
+            print(f'ST: set#{i}')
         local_par = par.copy()
         local_par['Dx'],local_par['Dy'] = [Pinv,Pinv]
         args = [(N, timesteps, local_par, fill)] * n_iter
