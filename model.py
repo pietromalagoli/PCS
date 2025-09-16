@@ -95,7 +95,7 @@ def lattice1(args,rng=None):
     lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
-    for t in range(time_steps):
+    for t in range(1,time_steps+1):
         prod = lattice_old[:, 0] * lattice_old[:, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, 0])
@@ -120,10 +120,10 @@ def lattice1(args,rng=None):
         np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         # mean
-        X_stoc[t] = lattice[:, 0].mean()
-        Y_stoc[t] = lattice[:, 1].mean()
+        X_stoc[t-1] = lattice[:, 0].mean()
+        Y_stoc[t-1] = lattice[:, 1].mean()
         if mode == 2:
-            density[t] = np.count_nonzero(lattice[:, 0]) / N
+            density[t-1] = np.count_nonzero(lattice[:, 0]) / N
     if mode == 1:
         return np.count_nonzero(lattice[:, 0]) / N
     elif mode == 2: 
@@ -155,7 +155,7 @@ def lattice2(args,rng=None):
     lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
-    for t in range(time_steps):
+    for t in range(1,time_steps+1):
         prod = lattice_old[:, :, 0] * lattice_old[:, :, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, :, 0])
@@ -181,10 +181,10 @@ def lattice2(args,rng=None):
             lattice[:,:,1] += np.roll(diffY,+1,axis=1) + np.roll(diffY,-1,axis=1)  
         np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
-        X_stoc[t] = lattice[:, :, 0].mean()    # mean
-        Y_stoc[t] = lattice[:, :, 1].mean()
+        X_stoc[t-1] = lattice[:, :, 0].mean()    # mean
+        Y_stoc[t-1] = lattice[:, :, 1].mean()
         if mode == 2:
-            density[t] = np.count_nonzero(lattice[:, :, 0]) / N**2
+            density[t-1] = np.count_nonzero(lattice[:, :, 0]) / N**2
     if mode == 1:
         return np.count_nonzero(lattice[:, :, 0]) / N**2
     elif mode == 2: 
@@ -216,7 +216,7 @@ def lattice3(args,rng=None):
     lattice_old = lattice.copy()
     X_stoc = np.zeros(time_steps, dtype=float)
     Y_stoc = np.zeros(time_steps, dtype=float)
-    for t in range(time_steps):
+    for t in range(1,time_steps+1):
         prod = lattice_old[:, :, :, 0] * lattice_old[:, :, :, 1]            # elementwise xy
         # vectorized Poisson draws
         births_x = rng.poisson(alpha * lattice_old[:, :, :, 0])
@@ -244,10 +244,10 @@ def lattice3(args,rng=None):
             lattice[:,:,:,1] += np.roll(diffY,+1,axis=2) + np.roll(diffY,-1,axis=2)  
         np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
-        X_stoc[t] = lattice[:, :, :, 0].mean()    # mean
-        Y_stoc[t] = lattice[:, :, :, 1].mean()
+        X_stoc[t-1] = lattice[:, :, :, 0].mean()    # mean
+        Y_stoc[t-1] = lattice[:, :, :, 1].mean()
         if mode == 2:
-            density[t] = np.count_nonzero(lattice[:, :, :, 0]) / N**3
+            density[t-1] = np.count_nonzero(lattice[:, :, :, 0]) / N**3
     if mode == 1:
         return np.count_nonzero(lattice[:, :, :, 0]) / N**3
     elif mode == 2: 
@@ -333,7 +333,7 @@ def DP1d(args,rng=None,verb:int=0):
     # Evaluate invasion probabilty of a site to its neighbours (note that they're two independent extractions)
     MinvR = rng.choice(2,(N,timesteps),p=np.array([1-Pinv,Pinv]))     # evaluate the Pinv to the right for each lattice site 
     MinvL = rng.choice(2,(N,timesteps),p=np.array([1-Pinv,Pinv]))     # evaluate the Pinv to the left for each lattice site
-    for t in range(timesteps):
+    for t in range(1,timesteps+1):
         lattice *= Mdis[:,t]        # disappearance step
         Rinv = lattice_old*MinvR[:,t]     # only lattice sites which were occupied at the previous step (i.e. had a value of 1) can invade
         Linv = lattice_old*MinvL[:,t] 
@@ -360,7 +360,7 @@ def DP2d(args,rng=None,verb:int=0):
     # Evaulate the probabilities out of the loop for better performance
     Mdis = rng.choice(2, size=(N, N, timesteps), p=[Pdis, 1 - Pdis])
     Minv = rng.choice(2, size=(N, N, 4, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up
-    for t in range(timesteps):
+    for t in range(1,timesteps+1):
         lattice *= Mdis[:, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, 0, t], +1, axis=1)  # right invasion
         lattice += np.roll(lattice_old * Minv[:, :, 1, t], -1, axis=1)  # left
@@ -387,7 +387,7 @@ def DP3d(args,rng=None,verb:int=0):
     # Evaulate the probabilities out of the loop for better performance
     Mdis = rng.choice(2, size=(N, N, N, timesteps), p=[Pdis, 1 - Pdis])
     Minv = rng.choice(2, size=(N, N, N, 6, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up,4:in,5:out
-    for t in range(timesteps):
+    for t in range(1,timesteps+1):
         lattice *= Mdis[:, :, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, :, 0, t], +1, axis=1)  # right invasion
         lattice += np.roll(lattice_old * Minv[:, :, :, 1, t], -1, axis=1)  # left
@@ -449,15 +449,15 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     Returns:
         _type_: _description_
     """
-    N, timesteps, par, n_iter, fill = params
+    N, timesteps, par, n_iter, mode = params
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
-    for i,Pinv in enumerate(Pspan):
+    for i,Dx in enumerate(Pspan):
         if i % 10 == 0:
             print(f'ST: set#{i}')
         local_par = par.copy()
-        local_par['Dx'],local_par['Dy'] = [Pinv,Pinv]
-        args = [(N, timesteps, local_par, fill)] * n_iter
+        local_par['Dx'] = Dx,
+        args = [(N, timesteps, local_par, mode)] * n_iter
         success = 0
         if n_iter == 1:
             success = model(args[0])
