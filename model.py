@@ -333,7 +333,7 @@ def DP1d(args,rng=None,verb:int=0):
     # Evaluate invasion probabilty of a site to its neighbours (note that they're two independent extractions)
     MinvR = rng.choice(2,(N,timesteps),p=np.array([1-Pinv,Pinv]))     # evaluate the Pinv to the right for each lattice site 
     MinvL = rng.choice(2,(N,timesteps),p=np.array([1-Pinv,Pinv]))     # evaluate the Pinv to the left for each lattice site
-    for t in range(1,timesteps+1):
+    for t in range(timesteps):
         lattice *= Mdis[:,t]        # disappearance step
         Rinv = lattice_old*MinvR[:,t]     # only lattice sites which were occupied at the previous step (i.e. had a value of 1) can invade
         Linv = lattice_old*MinvL[:,t] 
@@ -360,7 +360,7 @@ def DP2d(args,rng=None,verb:int=0):
     # Evaulate the probabilities out of the loop for better performance
     Mdis = rng.choice(2, size=(N, N, timesteps), p=[Pdis, 1 - Pdis])
     Minv = rng.choice(2, size=(N, N, 4, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up
-    for t in range(1,timesteps+1):
+    for t in range(timesteps):
         lattice *= Mdis[:, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, 0, t], +1, axis=1)  # right invasion
         lattice += np.roll(lattice_old * Minv[:, :, 1, t], -1, axis=1)  # left
@@ -387,7 +387,7 @@ def DP3d(args,rng=None,verb:int=0):
     # Evaulate the probabilities out of the loop for better performance
     Mdis = rng.choice(2, size=(N, N, N, timesteps), p=[Pdis, 1 - Pdis])
     Minv = rng.choice(2, size=(N, N, N, 6, timesteps), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up,4:in,5:out
-    for t in range(1,timesteps+1):
+    for t in range(timesteps):
         lattice *= Mdis[:, :, :, t]       # disappearance step
         lattice += np.roll(lattice_old * Minv[:, :, :, 0, t], +1, axis=1)  # right invasion
         lattice += np.roll(lattice_old * Minv[:, :, :, 1, t], -1, axis=1)  # left
@@ -456,7 +456,7 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
         if i % 10 == 0:
             print(f'ST: set#{i}')
         local_par = par.copy()
-        local_par['Dx'] = Dx,
+        local_par['Dx'] = Dx
         args = [(N, timesteps, local_par, mode)] * n_iter
         success = 0
         if n_iter == 1:
