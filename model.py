@@ -4,6 +4,7 @@ import seaborn as sns
 import os
 import concurrent.futures
 from scipy.integrate import odeint
+from tqdm.contrib.telegram import tqdm
 
 import aux      # it's a file with some generic auxiliary functions I often use
 
@@ -50,7 +51,7 @@ def plot_evolution(params):
     dim, N, time_steps, dt, z0, par, mode = params
     models = [lattice1,lattice2,lattice3]
     model = models[dim-1]
-    t_s = np.linspace(0,time_steps,time_steps)
+    t_s = 0 + dt * np.arange(time_steps)
     # Solve again the ODEs so to have it with the right parameters, in case that they're different for the stochastic case
     sol = odeint(system,z0,t_s,args=(par,))
     X_ode, Y_ode = sol[:,0], sol[:,1]
@@ -306,7 +307,7 @@ def lattice3(args,rng=None):
     sigma = par['sigma']
     Dx = par['Dx']
     Dy = par['Dy']
-    lattice = np.zeros((N, N, N, 2), dtype=np.int64)      # integer lattice for counts
+    lattice = np.zeros((N, N, N, 2), dtype=int)      # integer lattice for counts
     lattice[:, :, :, 0] = 3
     if Dx == 0 and Dy == 0:      # no diffusion
         lattice[:, :, :, 1] = lam/sigma
@@ -369,6 +370,7 @@ def lattice3(args,rng=None):
             lattice[:,:,:,0] -= diffX   # take out the diffused individuals
             lattice[:,:,:,1] -= diffY
         np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
+        np.minimum(lattice,int(1e9),out=lattice,dtype=int)
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         X_stoc[t-1] = lattice[:, :, :, 0].mean()    # mean
         Y_stoc[t-1] = lattice[:, :, :, 1].mean()
@@ -455,15 +457,14 @@ def DP1d(args,rng=None,verb:int=0):
     lattice_old = lattice.copy()
     if verb > 0:
         filling_history = np.zeros(timesteps,dtype=float)
-    # Evaulate the probabilities out of the loop for better performance
     for t in range(timesteps):
         Mdis = rng.choice(2,N,p=np.array([Pdis,1-Pdis]))     # evaluate the Pdis for each lattice site
         # Evaluate invasion probabilty of a site to its neighbours (note that they're two independent extractions)
         MinvR = rng.choice(2,N,p=np.array([1-Pinv,Pinv]))     # evaluate the Pinv to the right for each lattice site 
         MinvL = rng.choice(2,N,p=np.array([1-Pinv,Pinv]))     # evaluate the Pinv to the left for each lattice site
-        lattice *= Mdis[:]        # disappearance step
-        Rinv = lattice_old*MinvR[:]     # only lattice sites which were occupied at the previous step (i.e. had a value of 1) can invade
-        Linv = lattice_old*MinvL[:] 
+        lattice *= Mdis        # disappearance step
+        Rinv = lattice_old*MinvR     # only lattice sites which were occupied at the previous step (i.e. had a value of 1) can invade
+        Linv = lattice_old*MinvL 
         # invasion step (note that we consider a circular lattice, since for np.roll elements that roll beyond the last position are re-introduced at the first
         lattice += np.roll(Rinv,+1) + np.roll(Linv,-1)
         lattice = (lattice > 0).astype(np.int64)     # clip the lattice to 0s and 1s
@@ -486,13 +487,13 @@ def DP2d(args,rng=None,verb:int=0):
         filling_history = np.zeros(timesteps, dtype=float)
     for t in range(timesteps):
         # Evaulate the probabilities out of the loop for better performance
-        Mdis = rng.choice(2, size=(N, N), p=[Pdis, 1 - Pdis])
-        Minv = rng.choice(2, size=(N, N, 4), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up
-        lattice *= Mdis[:, :]       # disappearance step
-        lattice += np.roll(lattice_old * Minv[:, :, 0], +1, axis=1)  # right invasion
-        lattice += np.roll(lattice_old * Minv[:, :, 1], -1, axis=1)  # left
-        lattice += np.roll(lattice_old * Minv[:, :, 2], +1, axis=0)  # down
-        lattice += np.roll(lattice_old * Minv[:, :, 3], -1, axis=0)  # up
+        Mdis = rng.choice(2, size=(N, N), p=np.array([Pdis, 1 - Pdis]))
+        Minv = rng.choice(2, size=(N, N, 4), p=np.array([1 - Pinv, Pinv]))  # 0:right,1:left,2:down,3:up
+        lattice *= Mdis       # disappearance step
+        lattice += (np.roll(lattice_old * Minv[:, :, 0], +1, axis=1)  # right invasion
+                    + np.roll(lattice_old * Minv[:, :, 1], -1, axis=1)  # left
+                    + np.roll(lattice_old * Minv[:, :, 2], +1, axis=0)  # down
+                    + np.roll(lattice_old * Minv[:, :, 3], -1, axis=0))  # up
         lattice = (lattice > 0).astype(np.int64)     # clip the lattice to 0s and 1s
         lattice_old = lattice.copy()
         if verb > 0:
@@ -513,15 +514,15 @@ def DP3d(args,rng=None,verb:int=0):
         filling_history = np.zeros(timesteps, dtype=float)
     for t in range(timesteps):
         # Evaulate the probabilities out of the loop for better performance
-        Mdis = rng.choice(2, size=(N, N, N), p=[Pdis, 1 - Pdis])
-        Minv = rng.choice(2, size=(N, N, N, 6), p=[1 - Pinv, Pinv])  # 0:right,1:left,2:down,3:up,4:in,5:out
-        lattice *= Mdis[:, :, :]       # disappearance step
-        lattice += np.roll(lattice_old * Minv[:, :, :, 0], +1, axis=1)  # right invasion
-        lattice += np.roll(lattice_old * Minv[:, :, :, 1], -1, axis=1)  # left
-        lattice += np.roll(lattice_old * Minv[:, :, :, 2], +1, axis=0)  # down
-        lattice += np.roll(lattice_old * Minv[:, :, :, 3], -1, axis=0)  # up
-        lattice += np.roll(lattice_old * Minv[:, :, :, 4], +1, axis=2)  # in
-        lattice += np.roll(lattice_old * Minv[:, :, :, 5], -1, axis=2)  # out
+        Mdis = rng.choice(2, size=(N, N, N), p=np.array([Pdis, 1 - Pdis]))
+        Minv = rng.choice(2, size=(N, N, N, 6), p=np.array([1 - Pinv, Pinv]))  # 0:right,1:left,2:down,3:up,4:in,5:out
+        lattice *= Mdis       # disappearance step
+        lattice += (np.roll(lattice_old * Minv[:, :, :, 0], +1, axis=1)  # right invasion
+                    + np.roll(lattice_old * Minv[:, :, :, 1], -1, axis=1)  # left
+                    + np.roll(lattice_old * Minv[:, :, :, 2], +1, axis=0)  # down
+                    + np.roll(lattice_old * Minv[:, :, :, 3], -1, axis=0)  # up
+                    + np.roll(lattice_old * Minv[:, :, :, 4], +1, axis=2)  # in
+                    + np.roll(lattice_old * Minv[:, :, :, 5], -1, axis=2))  # out
         lattice = (lattice > 0).astype(np.int64)     # clip the lattice to 0s and 1s
         lattice_old = lattice.copy()
         if verb > 0:
@@ -546,11 +547,10 @@ def filling_fraction_DP(model,Pspan:np.ndarray,params:list):
         _type_: _description_
     """
     N, timesteps, Pdis, n_iter = params
-    F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
+    F = np.stack([Pspan,np.zeros(len(Pspan))],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
-    for i,Pinv in enumerate(Pspan):
-        if i % 10 == 0:
-            print(f'DP: set#{i}')
+    i = 0
+    for Pinv in tqdm(Pspan,token='8277133179:AAFE5QNsGn4rEAR3HzYtxmasGUarUWfbZwY',chat_id='1288694314'):
         args = [(N, timesteps, Pdis, Pinv)] * n_iter
         success = 0
         if n_iter == 1:
@@ -559,7 +559,8 @@ def filling_fraction_DP(model,Pspan:np.ndarray,params:list):
             with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
                 for res in exe.map(model,args):
                     success += res
-        F[1,i] = success/n_iter            
+        F[1,i] = success/n_iter    
+        i += 1        
     return F
 
 def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
@@ -576,15 +577,14 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     Returns:
         _type_: _description_
     """
-    N, timesteps, dt, par, n_iter, mode = params
-    F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
+    N, timesteps, dt, par, n_iter = params
+    F = np.stack([Pspan,np.zeros(len(Pspan))],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
-    for i,Dx in enumerate(Pspan):
-        if i % 10 == 0:
-            print(f'ST: set#{i}')
+    i = 0
+    for Dx in tqdm(Pspan,token='8277133179:AAFE5QNsGn4rEAR3HzYtxmasGUarUWfbZwY',chat_id='1288694314'):
         local_par = par.copy()
         local_par['Dx'] = Dx
-        args = [(N, timesteps, dt, local_par, mode)] * n_iter
+        args = [(N, timesteps, dt, local_par, 1)] * n_iter
         success = 0
         if n_iter == 1:
             success = model(args[0])
@@ -592,5 +592,37 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
             with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
                 for res in exe.map(model,args):
                     success += res
-        F[1,i] = success/n_iter            
+        F[1,i] = success/n_iter 
+        i += 1           
+    return F
+
+def figure9(model,NSpan:np.ndarray,params:list):
+    """Function to evaluate the filling fraction for different system sizes for a STOCHASTIC model. Utilizes ProcessPollExecutor for parallel execution, leading to better performances.
+
+    Args:
+        model (_type_): DP model
+        Pspan (np.ndarray): set of Pinv to test.
+        N (int, optional): lattice size. Defaults to 10000.
+        timesteps (int, optional): number of timesteps of each execution. Defaults to 500.
+        Pdis (float, optional): probabiilty of disappearence. Defaults to 0.
+        n_iter (int, optional): number of iterations for each set of parameters. Defaults to 50.
+
+    Returns:
+        _type_: _description_
+    """
+    timesteps, dt, par, n_iter, mode = params
+    F = np.stack([NSpan,np.zeros(NSpan.shape[0])],dtype=float)
+    max_workers = min(os.cpu_count() or 1,n_iter,8)
+    i = 0
+    for N in tqdm(NSpan,token='8277133179:AAFE5QNsGn4rEAR3HzYtxmasGUarUWfbZwY',chat_id='1288694314'):
+        args = [(N, timesteps, dt, par, mode)] * n_iter
+        success = 0
+        if n_iter == 1:
+            success = model(args[0])
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
+                for res in exe.map(model,args):
+                    success += res
+        F[1,i] = success/n_iter 
+        i += 1           
     return F
