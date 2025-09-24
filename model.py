@@ -54,6 +54,10 @@ def plot_evolution(params):
     # Solve again the ODEs so to have it with the right parameters, in case that they're different for the stochastic case
     sol = odeint(system,z0,t_s,args=(par,))
     X_ode, Y_ode = sol[:,0], sol[:,1]
+    local_par = par.copy()
+    local_par['Dx'] = 0
+    local_par['Dy'] = 0
+    X_stoc, Y_stoc = model([N,time_steps,dt,local_par,0])
     if mode == 2:
         X_ode = 0
         Y_ode = 0
@@ -68,7 +72,8 @@ def plot_evolution(params):
         scaley = 1
     fig, ax = plt.subplots(2,2,figsize=(14,12))
     # plot the evolution of x(t)
-    ax[0,0].plot(X_ode,c='deepskyblue',label='x(t)-MFT',alpha=0.7)    
+    ax[0,0].plot(X_ode,c='deepskyblue',label='x(t)-MFT',alpha=0.7)
+    ax[0,0].plot(X_stoc,c='orange', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)      
     ax[0,0].plot(X_diff/scalex,c='green',label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[0,0].set_title([f'Population({dim}D)' if mode == 0 else f'Filling Fraction ({dim}D)'])
     ax[0,0].set_xlabel('Time t')
@@ -77,6 +82,7 @@ def plot_evolution(params):
     ax[0,0].grid(True, which="both",alpha=0.4,linestyle='--')
 
     ax[0,1].plot(X_ode,c='deepskyblue',label='x(t)-MFT',alpha=0.7)
+    ax[0,1].plot(X_stoc/scalex,c='orange',label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
     ax[0,1].plot(X_diff/scalex,c='green',label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[0,1].set_title('ZOOM')
     ax[0,1].set_xlim(100,time_steps)
@@ -87,6 +93,7 @@ def plot_evolution(params):
     ax[0,1].grid(True, which="both",alpha=0.4,linestyle='--')
 
     ax[1,0].plot(X_ode, Y_ode, c='deepskyblue', label='MFT',alpha=0.7)
+    ax[1,0].plot(X_stoc/scalex, Y_stoc/scaley, c='green', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
     ax[1,0].plot(X_diff/scalex, Y_diff/scaley, c='green', label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[1,0].set_title(f'Trajectory of the solutions ({dim}D)')
     ax[1,0].set_xlabel('X')
@@ -94,6 +101,7 @@ def plot_evolution(params):
     ax[1,0].grid(True, which="both",alpha=0.4,linestyle='--')
 
     ax[1,1].plot(X_ode, Y_ode, c='deepskyblue', label='MFT',alpha=0.7)
+    ax[1,1].plot(X_stoc/scalex, Y_stoc/scaley, c='green', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
     ax[1,1].plot(X_diff/scalex, Y_diff/scaley, c='green', label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[1,1].set_title('ZOOM')
     ax[1,1].axvline(x=1,c='r',label='x=1',linestyle='--',alpha=0.4)
@@ -171,21 +179,14 @@ def lattice1(args,rng=None):
             diffY = rng.poisson(Dy*lattice_old[:,1] * dt)
             np.minimum(diffX,lattice_old[:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
             np.minimum(diffY,lattice_old[:,1],out=diffY)
-            '''
-            lattice[:,0] -= diffX   # take out the diffused individuals
-            lattice[:,1] -= diffY
-            diffX = diffX // 2      # divide the # of individuals to diffuse from each site by the # of neighbours
-            diffY = diffY // 2      # approximate down
-            lattice[:,0] += np.roll(diffX,+1) + np.roll(diffX,-1)  # add the diffused individuals
-            lattice[:,1] += np.roll(diffY,+1) + np.roll(diffY,-1)  
-            '''
-            for i in range(N):
-                xs = np.sum(rng.choice(2,size=diffX[i])) # 0=dx, 1 = sx
-                ys = np.sum(rng.choice(2,size=diffY[i]))
-                lattice[i-1,0] += xs
-                lattice[i+1,0] += diffX[i] - xs
-                lattice[i-1,1] += ys
-                lattice[i+1,1] += diffY[i] - ys
+            # Split diffused individuals between left/right with a binomial draw (vectorized)
+            leftX = rng.binomial(diffX, 0.5)
+            rightX = diffX - leftX
+            leftY = rng.binomial(diffY, 0.5)
+            rightY = diffY - leftY
+            # Add incoming migrants to neighbours on the circular lattice
+            lattice[:, 0] += np.roll(leftX, -1) + np.roll(rightX, +1)
+            lattice[:, 1] += np.roll(leftY, -1) + np.roll(rightY, +1)
             lattice[:,0] -= diffX   # take out the diffused individuals
             lattice[:,1] -= diffY
         np.maximum(lattice, 0, out=lattice,dtype=int)         # clip negatives in-place (no negative populations)
@@ -248,29 +249,31 @@ def lattice2(args,rng=None):
                 diffY = rng.poisson(Dy*lattice_old[:,:,1] * dt)
                 np.minimum(diffX,lattice_old[:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
                 np.minimum(diffY,lattice_old[:,:,1],out=diffY)
-                '''
+                # Split each site's diff count into updown/leftright, then split each into left/right or up/down.
+                updownX = rng.binomial(diffX,0.5)
+                leftrightX = diffX - updownX
+                upX = rng.binomial(updownX,0.5)
+                downX = updownX - upX
+                leftX = rng.binomial(leftrightX,0.5)
+                rightX = leftrightX - leftX
+
+                updownY = rng.binomial(diffY,0.5)
+                leftrightY = diffY - updownY
+                upY = rng.binomial(updownY,0.5)
+                downY = updownY - upY
+                leftY = rng.binomial(leftrightY,0.5)
+                rightY = leftrightY - leftY
+                # Add incoming migrants to neighbours on the circular lattice (roll shifts source -> destination)
+                lattice[:, :, 0] += (
+                    np.roll(leftX, -1, axis=1) + np.roll(rightX, +1, axis=1)
+                    + np.roll(upX, -1, axis=0) + np.roll(downX, +1, axis=0)
+                )
+                lattice[:, :, 1] += (
+                    np.roll(leftY, -1, axis=1) + np.roll(rightY, +1, axis=1)
+                    + np.roll(upY, -1, axis=0) + np.roll(downY, +1, axis=0)
+                )
                 lattice[:,:,0] -= diffX   # take out the diffused individuals
                 lattice[:,:,1] -= diffY
-                diffX = diffX // 4      # divide the # of individuals to diffuse from each site by the # of neighbours
-                diffY = diffY // 4      # approximate down
-                lattice[:,:,0] += np.roll(diffX,+1,axis=0) + np.roll(diffX,-1,axis=0)  # add the diffused individuals 
-                lattice[:,:,0] += np.roll(diffX,+1,axis=1) + np.roll(diffX,-1,axis=1)  
-                lattice[:,:,1] += np.roll(diffY,+1,axis=0) + np.roll(diffY,-1,axis=0)  
-                lattice[:,:,1] += np.roll(diffY,+1,axis=1) + np.roll(diffY,-1,axis=1)  
-                '''
-                for i in range(N**2):
-                    xs = rng.choice(4,size=diffX[i]) # 0=dx, 1 = sx, 2=up,3=down
-                    ys = rng.choice(4,size=diffY[i])
-                    lattice[i-1,i,0] += np.sum(xs[xs==3])
-                    lattice[i+1,i,0] += np.sum(xs[xs==2])
-                    lattice[i,i-1,0] += np.sum(xs[xs==1])
-                    lattice[i,i+1,0] += np.sum(xs[xs==0])
-                    lattice[i-1,i,1] += np.sum(ys[ys==3])
-                    lattice[i+1,i,1] += np.sum(ys[ys==2])
-                    lattice[i,i-1,1] += np.sum(ys[ys==1])
-                    lattice[i,i+1,1] += np.sum(ys[ys==0])
-            lattice[:,:,0] -= diffX   # take out the diffused individuals
-            lattice[:,:,1] -= diffY
             np.maximum(lattice, 0, out=lattice,dtype=np.int64)         # clip negatives in-place (no negative populations)
             np.minimum(lattice,int(1e9),out=lattice,dtype=np.int64)
             lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
@@ -293,7 +296,7 @@ def lattice3(args,rng=None):
     """
     Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
     """
-    N, time_steps, par, mode = args
+    N, time_steps, dt, par, mode = args
     if rng is None:
         rng = np.random.default_rng()
     alpha = par['alpha']        # pre-extract parameters (avoid repeated dict lookups)
@@ -317,29 +320,54 @@ def lattice3(args,rng=None):
     for t in range(1,time_steps+1):
         prod = lattice_old[:, :, :, 0] * lattice_old[:, :, :, 1]            # elementwise xy
         # vectorized Poisson draws
-        births_x = rng.poisson(alpha * lattice_old[:, :, :, 0])
-        kills_x = rng.poisson(gamma * prod)
-        births_y = rng.poisson(lam, size=N)
-        dup_y = rng.poisson(nu * prod)
-        deaths_y = rng.poisson(sigma * lattice_old[:, :, :, 1])
+        births_x = rng.poisson(alpha * lattice_old[:, :, :, 0] * dt)
+        kills_x = rng.poisson(gamma * prod * dt)
+        np.minimum(kills_x,lattice[:,:,:,0],out=kills_x)
+        births_y = rng.poisson(lam * dt, size=N)
+        dup_y = rng.poisson(nu * prod * dt)
+        deaths_y = rng.poisson(sigma * lattice_old[:, :, :, 1] * dt)
+        np.minimum(deaths_y,lattice[:,:,:,1],out=deaths_y)
         # update lattice (vectorized)
-        lattice[:, :, :, 0] = births_x - kills_x
-        lattice[:, :, :, 1] = births_y + dup_y - deaths_y
+        lattice[:, :, :, 0] += births_x - kills_x
+        lattice[:, :, :, 1] += births_y + dup_y - deaths_y
         if Dx or Dy > 0:    # diffusion
-            diffX = rng.poisson(Dx*lattice_old[:,:,:,0])
-            diffY = rng.poisson(Dy*lattice_old[:,:,:,1])
+            diffX = rng.poisson(Dx*lattice_old[:,:,:,0] * dt)
+            diffY = rng.poisson(Dy*lattice_old[:,:,:,1] * dt)
             np.minimum(diffX,lattice_old[:,:,:,0],out=diffX)    # the maximum of individuals to diffuse out is the population of the site
             np.minimum(diffY,lattice_old[:,:,:,1],out=diffY)
+            # Split each site's diff count into updown/leftright/frontback, then split each into left/right, up/down or front/back.
+            updownX = rng.binomial(diffX,1/3)
+            leftrightX = rng.binomial(diffX-updownX,0.5) 
+            frontbackX = diffX - updownX - leftrightX
+            upX = rng.binomial(updownX,0.5)
+            downX = updownX - upX
+            leftX = rng.binomial(leftrightX,0.5)
+            rightX = leftrightX - leftX
+            frontX = rng.binomial(frontbackX,0.5)
+            backX = frontbackX - frontX
+
+            updownY = rng.binomial(diffY,1/3)
+            leftrightY = rng.binomial(diffY-updownY,0.5) 
+            frontbackY = diffY - updownY - leftrightY
+            upY = rng.binomial(updownY,0.5)
+            downY = updownY - upY
+            leftY = rng.binomial(leftrightY,0.5)
+            rightY = leftrightY - leftY
+            frontY = rng.binomial(frontbackY,0.5)
+            backY = frontbackY - frontY
+            # Add incoming migrants to neighbours on the circular lattice (roll shifts source -> destination)
+            lattice[:, :, :, 0] += (
+                np.roll(frontX, -1, axis=2) + np.roll(backX, +1, axis=2)
+                + np.roll(leftX, -1, axis=1) + np.roll(rightX, +1, axis=1)
+                + np.roll(upX, -1, axis=0) + np.roll(downX, +1, axis=0)
+            )
+            lattice[:, :, :, 1] += (
+                np.roll(frontY, -1, axis=2) + np.roll(backY, +1, axis=2)
+                + np.roll(leftY, -1, axis=1) + np.roll(rightY, +1, axis=1)
+                + np.roll(upY, -1, axis=0) + np.roll(downY, +1, axis=0)
+            )
             lattice[:,:,:,0] -= diffX   # take out the diffused individuals
             lattice[:,:,:,1] -= diffY
-            diffX = diffX // 6      # divide the # of individuals to diffuse from each site by the # of neighbours
-            diffY = diffY // 6      # approximate down
-            lattice[:,:,:,0] += np.roll(diffX,+1,axis=0) + np.roll(diffX,-1,axis=0)  # add the diffused individuals 
-            lattice[:,:,:,0] += np.roll(diffX,+1,axis=1) + np.roll(diffX,-1,axis=1)  
-            lattice[:,:,:,0] += np.roll(diffX,+1,axis=2) + np.roll(diffX,-1,axis=2)  
-            lattice[:,:,:,1] += np.roll(diffY,+1,axis=0) + np.roll(diffY,-1,axis=0)  
-            lattice[:,:,:,1] += np.roll(diffY,+1,axis=1) + np.roll(diffY,-1,axis=1)  
-            lattice[:,:,:,1] += np.roll(diffY,+1,axis=2) + np.roll(diffY,-1,axis=2)  
         np.maximum(lattice, 0, out=lattice)         # clip negatives in-place (no negative populations)
         lattice_old = lattice.copy()           # prepare for next step (must copy to avoid aliasing)
         X_stoc[t-1] = lattice[:, :, :, 0].mean()    # mean
@@ -521,7 +549,7 @@ def filling_fraction_DP(model,Pspan:np.ndarray,params:list):
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Pinv in enumerate(Pspan):
-        if i & 10 == 0:
+        if i % 10 == 0:
             print(f'DP: set#{i}')
         args = [(N, timesteps, Pdis, Pinv)] * n_iter
         success = 0
@@ -548,7 +576,7 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
     Returns:
         _type_: _description_
     """
-    N, timesteps, par, n_iter, mode = params
+    N, timesteps, dt, par, n_iter, mode = params
     F = np.stack([Pspan,np.zeros(Pspan.shape[0])],dtype=float)
     max_workers = min(os.cpu_count() or 1,n_iter,8)
     for i,Dx in enumerate(Pspan):
@@ -556,7 +584,7 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
             print(f'ST: set#{i}')
         local_par = par.copy()
         local_par['Dx'] = Dx
-        args = [(N, timesteps, local_par, mode)] * n_iter
+        args = [(N, timesteps, dt, local_par, mode)] * n_iter
         success = 0
         if n_iter == 1:
             success = model(args[0])
