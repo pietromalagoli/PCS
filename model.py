@@ -20,7 +20,7 @@ def stability(par):         # In which regime are we?
         else:
             print(f'The attractor (x*,y*) is a stable spiral (negative discriminant -> damped oscillations)')
 
-def add_par_box(par):
+def add_par_box(par,coord=[0.98,0.60]):
     # Build lines for any numerical parameters in the dict, formatted with .2f
     lines = []
     for k in sorted(par.keys()):
@@ -44,7 +44,7 @@ def add_par_box(par):
 
     props = dict(boxstyle='round', facecolor='white', alpha=0.3)
     ax = plt.gca()
-    ax.text(0.98, 0.60, textstr, transform=ax.transAxes, fontsize=10,
+    ax.text(coord[0], coord[1], textstr, transform=ax.transAxes, fontsize=14,
             verticalalignment='top', horizontalalignment='right', bbox=props)
 
 def plot_evolution(params):
@@ -384,12 +384,11 @@ def lattice3(args,rng=None):
     return X_stoc, Y_stoc
 
 # Evaluating probability of disappearance
-def _run_model_check(args):
-    model, N, time_steps, par = args
-    X_stoc, _ = model((N, time_steps, par, 0))
+def _run_model_check(model,args):
+    X_stoc, _ = model(args)
     return 1 if X_stoc[-1] == 0 else 0
 
-def P_diss(model, num_nu:int, n_iter:int, N:int, time_steps:int, par:dict):
+def P_diss(model, params):
     """Evaluate statistically the probability of disappearance at the first pass near-zero.
 
     This optimized version:
@@ -398,6 +397,7 @@ def P_diss(model, num_nu:int, n_iter:int, N:int, time_steps:int, par:dict):
     - parallelizes independent stochastic realizations using ProcessPoolExecutor.
     """
     # copy base parameters to avoid mutating caller dict
+    num_nu, N, time_steps, dt, par, n_iter, mode = params
     base_par = par.copy()
     alpha = base_par['alpha']
     gamma = base_par['gamma']
@@ -422,14 +422,14 @@ def P_diss(model, num_nu:int, n_iter:int, N:int, time_steps:int, par:dict):
         par_local = base_par.copy()
         par_local['nu'] = nu            # use a fresh copy for this nu
         # build args for each independent run
-        args = [(model, N, time_steps, par_local) for _ in range(n_iter)]
+        args = [(N, time_steps, dt, par_local, mode) for _ in range(n_iter)]
         # run in parallel and sum successes
         success = 0
         if n_iter == 1:
-            success = _run_model_check(args[0])     # avoid executor overhead for single run
+            success = _run_model_check(model,args[0])     # avoid executor overhead for single run
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
-                for res in exe.map(_run_model_check, args):
+                for res in exe.map(_run_model_check, (model,args)):
                     success += res
         P_d[i,1] = success / n_iter
 
