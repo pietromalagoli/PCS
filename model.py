@@ -48,6 +48,11 @@ def add_par_box(par,coord=[0.98,0.60]):
             verticalalignment='top', horizontalalignment='right', bbox=props)
 
 def plot_evolution(params):
+    """Utility function for plotting the time evolution of the ISP system.
+
+    Args:
+        params (unpackable object): [dim,N,time_steps,dt,z0,par,mode]
+    """
     dim, N, time_steps, dt, z0, par, mode = params
     models = [lattice1,lattice2,lattice3]
     model = models[dim-1]
@@ -58,7 +63,7 @@ def plot_evolution(params):
     local_par = par.copy()
     local_par['Dx'] = 0
     local_par['Dy'] = 0
-    X_stoc, Y_stoc = model([N,time_steps,dt,local_par,0])
+    X_stoc, Y_stoc = model([N,time_steps,dt,local_par,mode])
     if mode == 2:
         X_ode = 0
         Y_ode = 0
@@ -74,7 +79,7 @@ def plot_evolution(params):
     fig, ax = plt.subplots(2,2,figsize=(14,12))
     # plot the evolution of x(t)
     ax[0,0].plot(X_ode,c='deepskyblue',label='x(t)-MFT',alpha=0.7)
-    ax[0,0].plot(X_stoc,c='orange', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)      
+    #ax[0,0].plot(X_stoc,c='orange', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)      
     ax[0,0].plot(X_diff/scalex,c='green',label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[0,0].set_title([f'Population({dim}D)' if mode == 0 else f'Filling Fraction ({dim}D)'])
     ax[0,0].set_xlabel('Time t')
@@ -94,7 +99,7 @@ def plot_evolution(params):
     ax[0,1].grid(True, which="both",alpha=0.4,linestyle='--')
 
     ax[1,0].plot(X_ode, Y_ode, c='deepskyblue', label='MFT',alpha=0.7)
-    ax[1,0].plot(X_stoc/scalex, Y_stoc/scaley, c='green', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
+    ax[1,0].plot(X_stoc/scalex, Y_stoc/scaley, c='orange', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
     ax[1,0].plot(X_diff/scalex, Y_diff/scaley, c='green', label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[1,0].set_title(f'Trajectory of the solutions ({dim}D)')
     ax[1,0].set_xlabel('X')
@@ -102,7 +107,7 @@ def plot_evolution(params):
     ax[1,0].grid(True, which="both",alpha=0.4,linestyle='--')
 
     ax[1,1].plot(X_ode, Y_ode, c='deepskyblue', label='MFT',alpha=0.7)
-    ax[1,1].plot(X_stoc/scalex, Y_stoc/scaley, c='green', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
+    ax[1,1].plot(X_stoc/scalex, Y_stoc/scaley, c='orange', label=f'x(t)-Stochastic,Dx={local_par['Dx']}',alpha=0.7)
     ax[1,1].plot(X_diff/scalex, Y_diff/scaley, c='green', label=f'x(t)-Stochastic,Dx={par['Dx']}',alpha=0.7)
     ax[1,1].set_title('ZOOM')
     ax[1,1].axvline(x=1,c='r',label='x=1',linestyle='--',alpha=0.4)
@@ -203,7 +208,8 @@ def lattice1(args,rng=None):
         return np.count_nonzero(lattice[:, 0]) / N
     elif mode == 2: 
         return densityx, densityy
-    return X_stoc, Y_stoc   # mean populations on the whole lattice
+    else:
+        return X_stoc, Y_stoc   # mean populations on the whole lattice
 
 def lattice2(args,rng=None):
     """
@@ -384,20 +390,13 @@ def lattice3(args,rng=None):
     return X_stoc, Y_stoc
 
 # Evaluating probability of disappearance
-def _run_model_check(model,args):
-    X_stoc, _ = model(args)
-    return 1 if X_stoc[-1] == 0 else 0
-
 def P_diss(model, params):
     """Evaluate statistically the probability of disappearance at the first pass near-zero.
-
-    This optimized version:
-    - minimizes dict lookups by using locals,
-    - computes distances vectorized,
-    - parallelizes independent stochastic realizations using ProcessPoolExecutor.
+    
     """
     # copy base parameters to avoid mutating caller dict
-    num_nu, N, time_steps, dt, par, n_iter, mode = params
+    num_nu, N, time_steps, dt, par, n_iter = params
+    mode = 1
     base_par = par.copy()
     alpha = base_par['alpha']
     gamma = base_par['gamma']
@@ -417,22 +416,22 @@ def P_diss(model, params):
     )
     # prepare parallel executor size (limit to avoid oversubscription)
     max_workers = min(os.cpu_count() or 1, n_iter, 8)    # 8 is an hard cap on the number of workes to avoid overwhelming the system. os.cpu_count() or 1 to avoid errors if cpu_count returns None, which can happen
-    for i, nu in enumerate(nu_values):
-        print(f'Distance #{i+1}...')
+    i = 0
+    for nu in tqdm(nu_values,token='8277133179:AAFE5QNsGn4rEAR3HzYtxmasGUarUWfbZwY',chat_id='1288694314'):
         par_local = base_par.copy()
         par_local['nu'] = nu            # use a fresh copy for this nu
         # build args for each independent run
-        args = [(N, time_steps, dt, par_local, mode) for _ in range(n_iter)]
+        args = [(N, time_steps, dt, par_local, mode)] * n_iter
         # run in parallel and sum successes
         success = 0
         if n_iter == 1:
-            success = _run_model_check(model,args[0])     # avoid executor overhead for single run
+            success = 1 if model(args[0]) < 1/N else 0     # avoid executor overhead for single run
         else:
             with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
-                for res in exe.map(_run_model_check, (model,args)):
-                    success += res
+                for res in exe.map(model, args):
+                    success += 1 if res < 1/N else 0
         P_d[i,1] = success / n_iter
-
+        i += 1
     return P_d
 
 # Direct Percolation Analysis
