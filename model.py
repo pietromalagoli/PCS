@@ -118,8 +118,63 @@ def plot_evolution(params):
     add_par_box(par)
     plt.legend(loc='upper right')
     plt.show()
+    
+def _check_death(args):
+    """Check if the pathogen population died in the first pass near zero.
 
-# Mean Field
+    Args:
+        args (unpackable): [model,N,time_steps,dt,par,mode]
+
+    Returns:
+        _type_: _description_
+    """
+    model, N, time_steps, dt, par, mode = args
+    X_stoc, _ = model([N,time_steps,dt,par,mode])
+    # find indices where X_stoc < 1
+    idx_less = np.nonzero(X_stoc < 1)[0]
+    # if no such index, no near-zero pass occurred -> consider as death (return 1)
+    if idx_less.size == 0:
+        return 1
+    t_tilde = idx_less[0]
+    # find indices after t_tilde where X_stoc > 1
+    idx_greater_after = np.nonzero(X_stoc[t_tilde:] > 1)[0]
+    # if population never returns above 1 after the near-zero pass -> death
+    if idx_greater_after.size == 0:
+        return 1
+    # otherwise it recovered at least once
+    return 0
+
+def Pdiss(params:list,verb:int=0):
+    """Function to compute Pdiss for a given set of parameters.
+
+    Args:
+        params (list): [model,N,time_steps,dt,par,mode,n_iter]
+        verb (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        _type_: _description_
+    """
+    model, N, time_steps, dt, par, mode, n_iter = params
+    max_workers = min(os.cpu_count() or 1, n_iter, 8)
+    deaths = 0
+    args = [(model,N,time_steps,dt,par,mode)] * n_iter
+    i = 0
+    if n_iter == 1:
+        deaths = _check_death(args[0])     # avoid executor overhead for single run
+    else:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as exe:
+            for res in exe.map(_check_death, args):
+                if verb > 0 and i % 10 == 0:
+                    print(f'Iteration #{i}')
+                deaths += res
+                i += 1
+    Pdiss = deaths/n_iter
+    if verb > 0:
+        print(f'Parameter set {par}')
+        print(f'Probability of disappaerance: {Pdiss}')
+    return Pdiss
+
+## Mean Field
 def system(z:np.ndarray ,t:np.ndarray ,par:dict):
     """ODEs system for the ISP problem.
 
@@ -142,8 +197,14 @@ def system(z:np.ndarray ,t:np.ndarray ,par:dict):
 
 # Stochastic system
 def lattice1(args,rng=None):
-    """
-    Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
+    """Vectorized stochastic lattice. Uses a numpy Generator for faster poisson draws.
+
+    Args:
+        args (unpackable): [N,time_steps,dt,par,mode]
+        rng (_type_, optional): _description_. Defaults to None.
+
+    Returns:
+        _type_: _description_
     """
     N, time_steps, dt, par, mode = args
     if rng is None:
@@ -157,10 +218,7 @@ def lattice1(args,rng=None):
     Dy = par['Dy']
     lattice = np.zeros((N, 2), dtype=int)      # integer lattice for counts
     lattice[:, 0] = 3       # initialization
-    if Dx == 0 and Dy == 0:      # no diffusion
-        lattice[:, 1] = lam/sigma
-    else:
-        lattice[:, 1] = rng.poisson(lam=1)
+    lattice[:, 1] = rng.poisson(lam=1)
     if mode == 2:  
         densityx = np.zeros(time_steps)
         densityy = np.zeros(time_steps)
@@ -190,9 +248,20 @@ def lattice1(args,rng=None):
             rightX = diffX - leftX
             leftY = rng.binomial(diffY, 0.5)
             rightY = diffY - leftY
+            '''
             # Add incoming migrants to neighbours on the circular lattice
             lattice[:, 0] += np.roll(leftX, -1) + np.roll(rightX, +1)
             lattice[:, 1] += np.roll(leftY, -1) + np.roll(rightY, +1)
+            '''
+            lattice[1,0] += rightX[0]
+            lattice[1,1] += rightY[0]
+            lattice[N-2,1] += leftY[N-1]
+            lattice[N-2,0] += leftX[N-1]
+            for i in range(1,N-1):
+                lattice[i-1,0] += leftX[i]
+                lattice[i+1,0] += rightX[i]
+                lattice[i-1,1] += leftY[i]
+                lattice[i+1,1] += rightY[i]
             lattice[:,0] -= diffX   # take out the diffused individuals
             lattice[:,1] -= diffY
         np.maximum(lattice, 0, out=lattice,dtype=int)         # clip negatives in-place (no negative populations)
@@ -205,7 +274,8 @@ def lattice1(args,rng=None):
             densityx[t-1] = np.count_nonzero(lattice[:, 0]) / N
             densityy[t-1] = np.count_nonzero(lattice[:, 1]) / N
     if mode == 1:   # filling fraction
-        return np.count_nonzero(lattice[:, 0]) / N
+    #    return np.count_nonzero(lattice[:, 0]) / N
+        return 1-(np.sum(lattice[:,0] < 1)/N)
     elif mode == 2: 
         return densityx, densityy
     else:
@@ -227,10 +297,7 @@ def lattice2(args,rng=None):
     Dy = par['Dy']
     lattice = np.zeros((N, N, 2), dtype=int)      # integer lattice for counts
     lattice[:, :, 0] = 3
-    if Dx == 0 and Dy == 0:      # no diffusion
-        lattice[:, :, 1] = lam/sigma
-    else:
-        lattice[:, :, 1] = rng.poisson(lam=1)
+    lattice[:, :, 1] = rng.poisson(lam=1)
     if mode == 2:
         densityx = np.zeros(time_steps)
         densityy = np.zeros(time_steps)
@@ -297,7 +364,8 @@ def lattice2(args,rng=None):
         return np.count_nonzero(lattice[:, :, 0]) / N**2
     elif mode == 2: 
         return densityx, densityy
-    return X_stoc, Y_stoc
+    else:
+        return X_stoc, Y_stoc
 
 def lattice3(args,rng=None):
     """
@@ -315,10 +383,7 @@ def lattice3(args,rng=None):
     Dy = par['Dy']
     lattice = np.zeros((N, N, N, 2), dtype=int)      # integer lattice for counts
     lattice[:, :, :, 0] = 3
-    if Dx == 0 and Dy == 0:      # no diffusion
-        lattice[:, :, :, 1] = lam/sigma
-    else:
-        lattice[:, :, :, 1] = rng.poisson(lam=1)
+    lattice[:, :, :, 1] = rng.poisson(lam=1)
     if mode == 2:
         density = np.zeros((2,time_steps))
     lattice_old = lattice.copy()
@@ -390,7 +455,7 @@ def lattice3(args,rng=None):
     return X_stoc, Y_stoc
 
 # Evaluating probability of disappearance
-def P_diss(model, params):
+def Figure2(model, params):
     """Evaluate statistically the probability of disappearance at the first pass near-zero.
     
     """
@@ -567,11 +632,7 @@ def filling_fraction_ST(model,Pspan:np.ndarray,params:list):
 
     Args:
         model (_type_): DP model
-        Pspan (np.ndarray): set of Pinv to test.
-        N (int, optional): lattice size. Defaults to 10000.
-        timesteps (int, optional): number of timesteps of each execution. Defaults to 500.
-        Pdis (float, optional): probabiilty of disappearence. Defaults to 0.
-        n_iter (int, optional): number of iterations for each set of parameters. Defaults to 50.
+        params (list): [N,time_steps,dt,par,n_iter]
 
     Returns:
         _type_: _description_
