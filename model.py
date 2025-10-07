@@ -35,7 +35,7 @@ def add_par_box(par,coord=[0.98,0.60]):
         if not isinstance(v_raw, bool) and isinstance(v_raw, (int, np.integer)):
             lines.append(f'{key_label}={v:.0f}')
         else:
-            lines.append(f'{key_label}={v:.2f}')
+            lines.append(f'{key_label}={v:.3f}')
 
     if not lines:
         return
@@ -270,13 +270,20 @@ def lattice1(args,rng=None):
         # mean
         X_stoc[t-1] = lattice[:, 0].mean()
         Y_stoc[t-1] = lattice[:, 1].mean()
+        zeros = np.count_nonzero(lattice[:, 0])
+        if zeros == 0:
+            X_stoc[t:] = 0.
+            Y_stoc[t:] = 0.
+            if mode == 2:
+               densityx[t:] = 0.
+               densityy[t:] = 0.
+            break
         if mode == 2:   # density
             densityx[t-1] = np.count_nonzero(lattice[:, 0]) / N
             densityy[t-1] = np.count_nonzero(lattice[:, 1]) / N
     if mode == 1:   # filling fraction
-    #    return np.count_nonzero(lattice[:, 0]) / N
-        return 1-(np.sum(lattice[:,0] < 1)/N)
-    elif mode == 2: 
+        return zeros / N
+    elif mode == 2: # density of active sites
         return densityx, densityy
     else:
         return X_stoc, Y_stoc   # mean populations on the whole lattice
