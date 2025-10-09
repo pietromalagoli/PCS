@@ -541,7 +541,7 @@ def DP1d(args,rng=None,verb:int=0):
         lattice = (lattice > 0).astype(np.int64)     # clip the lattice to 0s and 1s
         lattice_old = lattice.copy()
         if verb > 0:
-            print(f'Lattice:{lattice}')
+            #print(f'Lattice:{lattice}')
             filling_history[t] = np.sum(lattice)/N
     if verb > 0:
         return filling_history
